@@ -177,6 +177,7 @@ const recordManage = ref<any>({
 })
 // 深度监听画布上的元素变化
 watch(() => data.value, (newV) => {
+	console.log('watch data.value', newV)
 	temp.value = JSON.parse(JSON.stringify(newV))
 }, { deep: true })
 
@@ -223,9 +224,11 @@ const drop = (e: any) => {
 	push(addType.value)
 }
 
-// 开始移动
+// 开始移动，更新位置信息
 const onChange = (dragData: DragData, item: any) => {
-	
+	Object.keys(dragData).forEach((key) => {
+		item[key as keyof DragData] = dragData[key as keyof DragData]
+	})
 }
 
 // 开始拖拽
@@ -473,8 +476,8 @@ onMounted(() => {
 				margin-right: 100px;
 				display: flex;
 				justify-content: space-between;
-
-				// background: white;
+				background: white;
+				color: #000000;
 				left: calc(100% / 2 - 600px / 2);
 				border-radius: 10px;
 
