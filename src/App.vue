@@ -8,7 +8,12 @@
 			>{{ t.value }}</div>
 		</div>
 		<div class="content">
-			<div class="btn-box"></div>
+			<div class="btn-box">
+				<div class="btn">
+					<div class="btn-item" @click.stop="undo">撤销</div>
+					<div class="btn-item" @click.stop="redo">重做</div>
+				</div>
+			</div>
 			<div
 				class="es-editor"
 				@mousedown="onEditorMouseDown"
@@ -93,12 +98,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, onMounted, watch } from 'vue'
 // 锁定版本为 v1.2.1，升级后会出现样式问题
 import Drager, { type DragData } from 'es-drager'
 import GridRect from './component/GridRect.vue'
 import Area from './component/Area.vue'
-import { uuid } from './utils'
+import { uuid, diff } from './utils'
 
 const types = reactive({
 	"text": {
@@ -128,8 +133,8 @@ const defaultStyle = reactive({
 
 const addType = ref() // 记录拖拽类型
 const areaRef = ref() // 选区
-const current = ref() // 当前历史记录位置, -1表示不查看当前历史记录
-const currentIndex = ref(-1) // 记录正在被拖拽的元素
+// const current = ref() // 当前历史记录位置, -1表示不查看当前历史记录
+// const currentIndex = ref(-1) // 记录正在被拖拽的元素
 const hasAreaSelected = ref(false) // 是否有选中元素
 const isupd = ref(true) // 是否允许记录历史状态
 const temp = ref<any>() // 临时存放历史记录
@@ -166,20 +171,29 @@ const data = ref<any[]>([
 const grid = ref(10) // 网格大小
 
 const recordManage = ref<any>({
-	snapshots: [],
-	curIndex: 0,
-	maxLimit: 50
+	snapshots: [], // 记录的历史状态快照
+	curIndex: 0, // 记录正在被拖拽的元素
+	maxLimit: 50 // 最大记录数
+})
+// 深度监听画布上的元素变化
+watch(() => data.value, (newV) => {
+	temp.value = JSON.parse(JSON.stringify(newV))
+}, { deep: true })
+
+// 监听元素数组变化，并添加记录
+watch(() => data.value.length, () => {
+	recording()
 })
 
 // 鼠标按下编辑器区域事件
-function onEditorMouseDown(e: MouseEvent) {
+const onEditorMouseDown = (e: MouseEvent) => {
 	// 取消选中的目标
 	data.value.forEach((d: any) => { d.selected = false })
 	areaRef.value.onMouseDown(e)
 }
 
 // 框选完成遍历元素数组
-function onAreaMove(areaData: DragData) {
+const onAreaMove = (areaData: DragData) => {
 	data.value.forEach((d: any) => {
 		const containLeft = areaData.left < d.left && areaData.left + areaData.width >= d.left + d.width
 		const containTop = areaData.top < d.top && areaData.top + areaData.height >= d.top + d.height
@@ -188,7 +202,7 @@ function onAreaMove(areaData: DragData) {
 }
 
 // 松开区域选择
-function onAreaUp() {
+const onAreaUp = () => {
 	hasAreaSelected.value = data.value.some((d: any) => d.selected)
 	// 如果区域有选中元素
 	if (hasAreaSelected.value) {
@@ -201,7 +215,7 @@ function onAreaUp() {
 }
 
 // 拖进画布时的回调
-function drop(e: any) {
+const drop = (e: any) => {
 	addDistance.value = {
 		top: e.layerY,
 		left: e.layerX
@@ -210,25 +224,26 @@ function drop(e: any) {
 }
 
 // 开始移动
-function onChange(dragData: DragData, item: any) {
+const onChange = (dragData: DragData, item: any) => {
 	
 }
 
 // 开始拖拽
-function onDragStart(index: number) {
+const onDragStart = (index: number) => {
 	// 获取当前拖拽元素
 	const current = data.value[index]
 	// 记录开始拖拽时选中的数据，为了计算多个选中时移动的距离
 	moveDragData.value.prevTop = current.top
 	moveDragData.value.prevLeft = current.left
-	currentIndex.value = index
+	// 当前记录
+	recordManage.value.curIndex = index
 
 	// 计算参考线并获取参考线信息
 	lines.value = calcLines()
 }
 
 // 拖拽中
-function onDrag(dragData: DragData) {
+const onDrag = (dragData: DragData) => {
 	// 参考线代码
 	markLine.value.top = null;
 	markLine.value.left = null;
@@ -252,7 +267,7 @@ function onDrag(dragData: DragData) {
 	const disY = dragData.top - moveDragData.value.prevTop
 	// 如果选中了多个
 	data.value.forEach((item: any, index: number) => {
-		if(item.selected && currentIndex.value !== index) {
+		if (item.selected && recordManage.value.curIndex !== index) {
 			// 将选中且不是当前拖拽的元素，同时进行移动
 			item.top! += disY
 			item.left! += disX
@@ -264,22 +279,24 @@ function onDrag(dragData: DragData) {
 }
 
 // 拖拽结束
-function dragEnd() {
+const dragEnd = () => {
+	isupd.value = true
 	// 拖拽结束后重置辅助线数据
 	markLine.value = {
 		top: null,
 		left: null
 	}
+	recording()
 }
 
 // 选中元素
-function check(index: number) {
+const check = (index: number) => {
 	data.value.forEach((d: any) => d.selected = false)
 	data.value[index].selected = true
 }
 
 // 初始化拖拽位置
-function reset() {
+const reset = () => {
 	addDistance.value = {
 		top: 0,
 		left: 0
@@ -287,13 +304,13 @@ function reset() {
 }
 
 // 计算辅助线的位置
-function calcLines() {
+const calcLines = () => {
 	const lines: any = { x: [], y: [] }
 	// 当前拖拽元素大小
-	const { width, height } = data.value[currentIndex.value!] as any
+	const { width, height } = data.value[recordManage.value.curIndex!] as any
 	// 循环遍历画布所有元素，将除当前拖拽元素外所有其它元素生成辅助线的位置保存，每个元素x和y都会有5种
 	data.value.forEach((block, i: number) => {
-		if (currentIndex.value! === i) return
+		if (recordManage.value.curIndex! === i) return
 		const { top: ATop, left: ALeft, width: AWidth, height: AHeight } = block as any
 
 		lines.x.push({ showLeft: ALeft, left: ALeft })
@@ -312,7 +329,7 @@ function calcLines() {
 }
 
 // 添加画布元素
-function push(type: string) {
+const push = (type: string) => {
 	data.value.push({
 		id: uuid(),
 		type,
@@ -323,11 +340,42 @@ function push(type: string) {
 	reset()
 }
 
+// 撤销
+const undo = () => {
+	// 没有可撤销元素
+	if (recordManage.value.curIndex === 0) return
+	// 返回上一个历史记录
+	recordManage.value.curIndex--
+	data.value = recordManage.value.snapshots[recordManage.value.curIndex]
+}
+
+// 重做
+const redo = () => {
+	const { snapshots, curIndex } = recordManage.value
+	if (curIndex >= snapshots.length - 1) return
+	recordManage.value.curIndex++
+	data.value = recordManage.value.snapshots[recordManage.value.curIndex]
+}
+
 // 记录状态
-function recording() {
-	if (isupd.value && temp.value?.length) {
-		
+const recording = () => {
+	const { snapshots, curIndex, maxLimit } = recordManage.value
+	// 如果两个状态相同，则不添加历史记录
+	if (!diff(temp.value, snapshots[curIndex])) return false
+	// 如果在撤销过程中执行了新的操作，则覆盖上一个状态
+	if (snapshots.length - 1 === curIndex) {
+		snapshots.splice(curIndex + 1, snapshots.length)
 	}
+	// 超过最大限制记录
+	if (snapshots.length > maxLimit) {
+		snapshots.shift()
+	}
+
+	// 更新记录并重置临时历史记录
+	recordManage.value.snapshots.push(temp.value)
+	recordManage.value.curIndex = recordManage.value.snapshots.length - 1
+	temp.value = []
+	console.log('recordManage', recordManage.value)
 }
 
 onMounted(() => {
@@ -426,7 +474,7 @@ onMounted(() => {
 				display: flex;
 				justify-content: space-between;
 
-				background: white;
+				// background: white;
 				left: calc(100% / 2 - 600px / 2);
 				border-radius: 10px;
 
